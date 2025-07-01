@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Branch Stock Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global Firebase variables accessible in the main script
+        window.firebaseApp = initializeApp(JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}'));
+        window.db = getFirestore(window.firebaseApp);
+        window.auth = getAuth(window.firebaseApp);
+
+        // Expose Firestore functions to the global window object
+        window.collection = collection;
+        window.onSnapshot = onSnapshot;
+        window.doc = doc;
+        window.setDoc = setDoc;
+        window.addDoc = addDoc;
+        window.updateDoc = updateDoc;
+        window.deleteDoc = deleteDoc;
+
+        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // Authentication logic
+        onAuthStateChanged(window.auth, async (user) => {
+            if (user) {
+                window.currentUserId = user.uid;
+                document.getElementById('userIdDisplay').textContent = `User ID: ${window.currentUserId}`;
+                document.getElementById('loadingStatus').textContent = 'Data loading...';
+                // Trigger data loading and chart rendering after auth
+                window.initAppData();
+            } else {
+                try {
+                    if (typeof __initial_auth_token !== 'undefined') {
+                        await signInWithCustomToken(window.auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(window.auth);
+                    }
+                } catch (error) {
+                    console.error("Firebase authentication failed:", error);
+                    document.getElementById('loadingStatus').textContent = 'Authentication failed. Please try again.';
+                }
+            }
+        });
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Warm Neutral Harmony (Stone, Slate, Teal, Orange) -->
+    <!-- Application Structure Plan: The application is designed as a single-page dashboard with a top-level branch selector to contextualize data entry and local stock views. Global navigation allows users to jump between sections. The structure includes: 1) 'Input Data' for adding transactions, now tagged with the selected branch. 2) 'Current Branch Stock' showing inventory specific to the chosen branch. 3) 'Overall Stock Summary' for total company-wide inventory. 4) 'Engineer Consumption Analytics' providing a global view of material usage by all engineers. 5) 'Branch Logistics Overview' for inter-branch transfers. 6) 'Branch Stock Snapshot' for comparing stock across branches. 7) 'Overall Data Visualizations' for general company-wide trends. This architecture supports both localized branch management and centralized reporting, prioritizing user understanding of both micro and macro inventory states. -->
+    <!-- Visualization & Content Choices:
+        - Report Info: Branch Selection. Goal: Contextualize data. Viz/Method: HTML dropdown. Interaction: Select branch to filter views. Justification: Enables multi-branch management within a single user session. Library: Vanilla JS.
+        - Report Info: Transaction input. Goal: Enable input & persist. Viz/Method: HTML form with dynamic dropdowns, linked to Firestore. Interaction: Form submission saves to DB. Justification: Standard, clear method for persistent data entry, now branch-aware. Library: Vanilla JS, Firebase Firestore.
+        - Report Info: Current Branch Stock. Goal: Inform/Organize & persist. Viz/Method: Dynamic HTML table, filtered by selected branch from Firestore. Interaction: Table updates on DB changes. Justification: Provides a clear, real-time view of local branch inventory. Library: Vanilla JS, Firebase Firestore.
+        - Report Info: Total Company Stock. Goal: Inform/Summarize. Viz/Method: Large number display with explanatory text. Interaction: None. Justification: Provides a quick, high-level overview of total assets. Library: Vanilla JS.
+        - Report Info: Engineer Consumption (Monthly, Global). Goal: Measure Performance. Viz/Method: Bar Chart (Chart.js) showing engineer vs. total issued quantity from global transactions. Interaction: Tooltips. Justification: Visualizes company-wide consumption patterns per engineer from persistent data. Library: Chart.js, Firebase Firestore.
+        - Report Info: Branch Movements (Issued/Received, Global). Goal: Track Logistics. Viz/Method: Grouped Bar Chart (Chart.js) showing branch issued vs. received from global transactions. Interaction: Tooltips. Justification: Provides a comparative view of material flow between all branches. Library: Chart.js, Firebase Firestore.
+        - Report Info: Branch Stock Reports (Cross-Branch). Goal: Visualize External Inventory. Viz/Method: Bar Chart (Chart.js) comparing stock of specific items across branches from Firestore. Interaction: Tooltips, Branch Selector. Justification: Gives an immediate visual comparison of inventory health at different branch locations for key items, with persistence. Library: Chart.js, Firebase Firestore.
+        - Report Info: Stock Quantity by Item (Overall Company). Goal: Inform/Compare. Viz/Method: Bar Chart (Chart.js) showing item vs. quantity from aggregated stock across all branches. Interaction: Tooltips. Justification: Clearly compares overall stock levels from persistent data. Library: Chart.js, Firebase Firestore.
+        - Report Info: Transaction Trends (Received vs. Issued Overall Company). Goal: Show Change. Viz/Method: Line Chart (Chart.js) tracking daily quantities from global transactions. Interaction: Tooltips. Justification: Visualizes overall movement patterns over time from persistent data. Library: Chart.js, Firebase Firestore.
+        - Report Info: Stock Type Distribution (Overall Company). Goal: Show Proportions. Viz/Method: Pie Chart (Chart.js) breaking down stock by category from aggregated stock. Interaction: Tooltips. Justification: Offers a quick overview of overall company inventory composition from persistent data. Library: Chart.js, Firebase Firestore.
+        - Report Info: Data Export. Goal: Provide data portability. Viz/Method: Download button. Interaction: Click to download CSV. Justification: Allows users to export their data for external analysis or backup. Library: Vanilla JS.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style src="style.css"></style>
+</head>
+<body class="bg-stone-50 text-slate-800">
+
+    <header class="bg-white/80 backdrop-blur-lg sticky top-0 z-50 border-b border-stone-200 shadow-sm">
+        <nav class="container mx-auto px-6 py-4 flex justify-between items-center">
+            <a href="#" class="text-2xl font-bold text-slate-900">🗄️ StockWise Pro</a>
+            <div class="hidden md:flex items-center space-x-6">
+                <a href="#input-data" class="text-slate-600 hover:text-teal-600 transition-colors">Input</a>
+                <a href="#current-branch-stock" class="text-slate-600 hover:text-teal-600 transition-colors">My Stock</a>
+                <a href="#overall-stock" class="text-slate-600 hover:text-teal-600 transition-colors">Total Stock</a>
+                <a href="#engineer-analytics" class="text-slate-600 hover:text-teal-600 transition-colors">Engineers</a>
+                <a href="#branch-logistics" class="text-slate-600 hover:text-teal-600 transition-colors">Branches</a>
+                <a href="#charts" class="text-slate-600 hover:text-teal-600 transition-colors">Visuals</a>
+            </div>
+            <button id="mobile-menu-btn" class="md:hidden text-slate-800 focus:outline-none">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
+            </button>
+        </nav>
+        <div id="mobile-menu" class="hidden md:hidden bg-white border-t border-stone-200">
+            <a href="#input-data" class="block py-2 px-6 text-slate-700 hover:bg-stone-100">Input Data</a>
+            <a href="#current-branch-stock" class="block py-2 px-6 text-slate-700 hover:bg-stone-100">My Branch Stock</a>
+            <a href="#overall-stock" class="block py-2 px-6 text-slate-700 hover:bg-stone-100">Overall Stock Summary</a>
+            <a href="#engineer-analytics" class="block py-2 px-6 text-slate-700 hover:bg-stone-100">Engineer Analytics</a>
+            <a href="#branch-logistics" class="block py-2 px-6 text-slate-700 hover:bg-stone-100">Branch Logistics</a>
+            <a href="#charts" class="block py-2 px-6 text-slate-700 hover:bg-stone-100">Data Visualizations</a>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-6 py-8 md:py-12">
+        <div class="text-center mb-8 text-sm text-slate-500">
+            <p id="loadingStatus">Initializing application...</p>
+            <p id="userIdDisplay" class="font-medium mt-1"></p>
+        </div>
+
+        <section class="mb-12 bg-white p-6 rounded-lg shadow-lg border border-stone-200">
+            <h2 class="text-2xl font-bold text-slate-900 mb-4">Manage Your Branch</h2>
+            <p class="text-slate-600 mb-4">Select your branch to view its specific stock and enter transactions. Global reports will always reflect data from all branches.</p>
+            <div class="flex items-center gap-4">
+                <label for="branchSelector" class="block text-lg font-medium text-slate-700">Current Branch:</label>
+                <select id="branchSelector" class="mt-1 block w-full md:w-1/3 border border-stone-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm">
+                    <!-- Options will be dynamically populated -->
+                </select>
+            </div>
+        </section>
+
+        <section id="input-data" class="mb-16 md:mb-24 bg-white p-6 md:p-8 rounded-lg shadow-lg border border-stone-200">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl md:text-4xl font-bold text-slate-900">Add New Stock Transaction</h2>
+                <p class="max-w-xl mx-auto mt-4 text-slate-600">Enter material movements for your selected branch. This data will be centralized for company-wide reporting.</p>
+            </div>
+            <form id="transactionForm" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="itemId" class="block text-sm font-medium text-slate-700 mb-1">Item ID</label>
+                    <input type="text" id="itemId" class="mt-1 block w-full border border-stone-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm" placeholder="e.g., FOC-100m" required>
+                </div>
+                <div>
+                    <label for="itemName" class="block text-sm font-medium text-slate-700 mb-1">Item Name</label>
+                    <input type="text" id="itemName" class="mt-1 block w-full border border-stone-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm" placeholder="e.g., Fiber Optic Cable 100m" required>
+                </div>
+                <div>
+                    <label for="itemType" class="block text-sm font-medium text-slate-700 mb-1">Item Category</label>
+                    <select id="itemType" class="mt-1 block w-full border border-stone-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm" required>
+                        <option value="">Select Category</option>
+                        <option value="Cable">Cable</option>
+                        <option value="Device">Device</option>
+                        <option value="Connector">Connector</option>
+                        <option value="Tool">Tool</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="quantity" class="block text-sm font-medium text-slate-700 mb-1">Quantity</label>
+                    <input type="number" id="quantity" class="mt-1 block w-full border border-stone-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm" min="1" required>
+                </div>
+                <div>
+                    <label for="transactionType" class="block text-sm font-medium text-slate-700 mb-1">Transaction Type</label>
+                    <select id="transactionType" class="mt-1 block w-full border border-stone-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm" required>
+                        <option value="">Select Type</option>
+                        <option value="Received From Supplier">Received From Supplier</option>
+                        <option value="Received From Branch">Received From Branch</option>
+                        <option value="Issued To Engineer">Issued To Engineer</option>
+                        <option value="Issued To Branch">Issued To Branch</option>
+                        <option value="Stock Correction">Stock Correction</option>
+                    </select>
+                </div>
+                <div id="sourceDestinationContainer">
+                    <label for="sourceDestination" class="block text-sm font-medium text-slate-700 mb-1">Source/Destination</label>
+                    <select id="sourceDestination" class="mt-1 block w-full border border-stone-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm" required>
+                        <!-- Options populated dynamically -->
+                    </select>
+                </div>
+                <div class="md:col-span-2 flex justify-end">
+                    <button type="submit" class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-colors">
+                        Add Transaction Record
+                    </button>
+                </div>
+            </form>
+            <div id="messageBox" class="mt-4 p-3 rounded-md hidden"></div>
+        </section>
+
+        <section id="current-branch-stock" class="mb-16 md:mb-24 bg-white p-6 md:p-8 rounded-lg shadow-lg border border-stone-200">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl md:text-4xl font-bold text-slate-900">Current Stock for <span id="currentBranchNameDisplay">Your Branch</span></h2>
+                <p class="max-w-xl mx-auto mt-4 text-slate-600">This table provides a real-time view of the inventory specifically for your selected branch, directly from the centralized database.</p>
+            </div>
+            <div class="overflow-x-auto rounded-lg border border-stone-200 shadow-sm">
+                <table class="min-w-full divide-y divide-stone-200">
+                    <thead class="bg-stone-100">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Item ID</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Item Name</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Category</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Current Stock</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stockTableBody" class="bg-white divide-y divide-stone-200">
+                        
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="overall-stock" class="mb-16 md:mb-24 bg-white p-6 md:p-8 rounded-lg shadow-lg border border-stone-200">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl md:text-4xl font-bold text-slate-900">Overall Company Stock Summary</h2>
+                <p class="max-w-xl mx-auto mt-4 text-slate-600">This section provides a high-level overview of the total inventory available across all your branches, giving you a complete picture of your company's assets.</p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 text-center">
+                <div class="bg-stone-50 p-6 rounded-lg border border-stone-200">
+                    <h3 class="font-semibold text-slate-800 mb-2">Total Items Across All Branches</h3>
+                    <p id="totalItemsDisplay" class="text-5xl font-bold text-teal-600">0</p>
+                </div>
+                <div class="bg-stone-50 p-6 rounded-lg border border-stone-200">
+                    <h3 class="font-semibold text-slate-800 mb-2">Total Stock Quantity (All Items, All Branches)</h3>
+                    <p id="totalStockQuantityDisplay" class="text-5xl font-bold text-orange-600">0</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="engineer-analytics" class="mb-16 md:mb-24 bg-white p-6 md:p-8 rounded-lg shadow-lg border border-stone-200">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl md:text-4xl font-bold text-slate-900">Engineer Consumption Analytics (Company-Wide)</h2>
+                <p class="max-w-xl mx-auto mt-4 text-slate-600">Gain insights into how much material each engineer across all branches has consumed monthly. This chart helps monitor field team resource usage and identify trends.</p>
+            </div>
+            <div class="bg-stone-50 p-6 rounded-lg border border-stone-200">
+                <h3 class="font-semibold text-slate-800 mb-4">Total Materials Issued to Engineers (Monthly)</h3>
+                <div class="chart-container">
+                    <canvas id="engineerConsumptionChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <section id="branch-logistics" class="mb-16 md:mb-24 bg-white p-6 md:p-8 rounded-lg shadow-lg border border-stone-200">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl md:text-4xl font-bold text-slate-900">Branch Logistics Overview (Inter-Branch Transfers)</h2>
+                <p class="max-w-xl mx-auto mt-4 text-slate-600">Track the flow of materials between your different branches. This section visualizes how much stock is issued to, and received from, each branch by other branches, offering a clear picture of inter-branch material movements.</p>
+            </div>
+            <div class="bg-stone-50 p-6 rounded-lg border border-stone-200">
+                <h3 class="font-semibold text-slate-800 mb-4">Materials Issued To & Received From Branches (Overall)</h3>
+                <div class="chart-container">
+                    <canvas id="branchMovementChart"></canvas>
+                </div>
+            </div>
+            <div class="bg-stone-50 p-6 rounded-lg border border-stone-200 mt-8">
+                <h3 class="font-semibold text-slate-800 mb-4">Branch Stock Snapshot (Key Items Across Branches)</h3>
+                <p class="text-sm text-slate-600 mb-4">This chart provides a comparative view of inventory levels for key items across all your branches. Select an item to see its stock distribution.</p>
+                <div class="mb-4">
+                    <label for="itemForBranchStockSelector" class="block text-sm font-medium text-slate-700 mb-1">Select Item:</label>
+                    <select id="itemForBranchStockSelector" class="mt-1 block w-full md:w-1/2 border border-stone-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm">
+                        <!-- Options populated dynamically -->
+                    </select>
+                </div>
+                <div class="chart-container">
+                    <canvas id="branchStockChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <section id="charts" class="bg-white p-6 md:p-8 rounded-lg shadow-lg border border-stone-200">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl md:text-4xl font-bold text-slate-900">Overall Company Data Visualizations</h2>
+                <p class="max-w-xl mx-auto mt-4 text-slate-600">Understand your overall company inventory health with these dynamic charts. See total stock distribution by category and track general transaction trends across all branches.</p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div class="bg-stone-50 p-6 rounded-lg border border-stone-200">
+                    <h3 class="font-semibold text-slate-800 mb-4">Current Stock by Item (Company-Wide)</h3>
+                    <div class="chart-container">
+                        <canvas id="stockQuantityChart"></canvas>
+                    </div>
+                </div>
+                <div class="bg-stone-50 p-6 rounded-lg border border-stone-200">
+                    <h3 class="font-semibold text-slate-800 mb-4">Overall Transaction Trend (Last 30 Days)</h3>
+                    <div class="chart-container">
+                        <canvas id="transactionTrendChart"></canvas>
+                    </div>
+                </div>
+                <div class="lg:col-span-2 bg-stone-50 p-6 rounded-lg border border-stone-200">
+                    <h3 class="font-semibold text-slate-800 mb-4">Overall Stock Distribution by Category (Company-Wide)</h3>
+                    <div class="chart-container">
+                        <canvas id="stockCategoryChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+    
+    <footer class="bg-slate-800 text-slate-400">
+        <div class="container mx-auto px-6 py-4 text-center text-sm">
+            <p>&copy; 2025 StockWise Pro. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
+
+
+
+

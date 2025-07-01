@@ -1,0 +1,19 @@
+  
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px; /* Increased max-width for better chart readability */
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 450px; /* Adjusted max-height */
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 380px; /* Adjusted height for larger screens */
+            }
+        }
+   
