@@ -1,0 +1,9 @@
+/* client/src/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Optional: Set a default font */
+body {
+  font-family: 'Inter', sans-serif;
+}
